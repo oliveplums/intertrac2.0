@@ -13,7 +13,6 @@ from shapely.geometry import Point
 import plotly.graph_objects as go
 import numpy as np
 import math
-from streamlit_plotly_events import plotly_events
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

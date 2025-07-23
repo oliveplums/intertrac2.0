@@ -13,6 +13,7 @@ from shapely.geometry import Point
 import plotly.graph_objects as go
 import numpy as np
 import math
+from streamlit_plotly_events import plotly_events
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -234,14 +235,33 @@ if st.button("Fetch Data"):
         above_3 = df_ais[df_ais['speed'] > 3]
         perc_above_3 = (above_3['Diff'].sum() / df_ais['Diff'].sum()) * 100 if df_ais['Diff'].sum().total_seconds() > 0 else 0
         
-        # Summary table
+
+        # Create the summary table
         summary_df = pd.DataFrame({
-            "Metric": ["Sea Miles per Month (SMM)", "Total Sea Miles", "% Time > 10 knots", "% Time > 3 knots"],
-            "Value": [round(smm, 2), round(total_miles, 2), f"{perc_above_10:.2f}%", f"{perc_above_3:.2f}%"]
+            "Metric": ["Sea Miles per Month (SMM)", "Total Sea Miles", "% Activity above 10 knots", "% Activity above 3 knots"],
+            f"{imo_list[0]}": [round(smm, 0), round(total_miles, 0), f"{perc_above_10:.0f}%", f"{perc_above_3:.0f}%"]
         })
-        
+
+        # Convert Value to string for consistent formatting
+        summary_df[f"{imo_list[0]}"] = summary_df[f"{imo_list[0]}"].astype(str)
+
+
+        # Transpose the dataframe to make metrics the column headers
+        summary_transposed = summary_df.set_index("Metric").T
+
+        # Apply styling
+        styled_df = summary_transposed.style.set_properties(**{
+            'background-color': '#f0f2f6',
+            'color': 'black',
+            'border-color': 'gray',
+            'font-size': '16px',
+            'text-align': 'left'
+        }).hide(axis="index")
+
+        # Display
         st.subheader("📈 Speed and Activity Summary")
-        st.table(summary_df)
+        st.dataframe(styled_df, use_container_width=True)
+
 
 #####MAP###############
 
@@ -350,11 +370,11 @@ if st.button("Fetch Data"):
         # Customize plot title and labels
         fig.update_layout(title='Speed Timeline',
             yaxis_title='Speed / knots',
-            xaxis_tickformat='%b %Y',template='plotly_white', autosize=False, bargap=0.30,
+            xaxis_tickformat='%d %B %Y',template='plotly_white', autosize=False, bargap=0.30,
                           font=dict(color='grey',size=14),
                            showlegend=False,# Set the font color to black and size to 12
                           width=1000,  # Set the width of the figure to make the graph longer
-                          height=300   # Optionally set the height of the figure
+                          height=500   # Optionally set the height of the figure
         )
         st.subheader("Speed Timeline")
         st.plotly_chart(fig, key="speed timeline")
@@ -378,12 +398,16 @@ if st.button("Fetch Data"):
                         yaxis_title="Percentage (%)",
                           font=dict(color='grey',size=14),  # Set the font color to black and size to 12
                           width=400,  # Set the width of the histfigure to make the graph longer
-                          height=250   # Optionally set the height of the histfigure
+                          height=400   # Optionally set the height of the histfigure
         )
 
 
-        st.subheader("Speed Histogram")
-        st.plotly_chart(histfig, key="speed hist")
+        # Display the chart in half the page
+        col1, col2 = st.columns([1, 1])  # Two equal-width columns
+
+        with col1:  # or use col2 if you prefer
+            st.subheader("Speed Histogram")
+            st.plotly_chart(histfig, use_container_width=True, key="speed hist")
 
 
 ########## Fouling Challenge #############
@@ -422,12 +446,13 @@ if st.button("Fetch Data"):
                           template='plotly_white', autosize=False, bargap=0.30,
                           yaxis_title="Percentage (%)",
                           font=dict(color='grey',size=14),  # Set the font color to black and size to 12
-                          width=500,  # Set the width of the figure to make the graph longer
-                          height=300   # Optionally set the height of the figure
+                          width=400,  # Set the width of the figure to make the graph longer
+                          height=400   # Optionally set the height of the figure
         )
+        with col2:
+            st.subheader("Fouling Challenge")
+            st.plotly_chart(fig, key="fc")
 
-        st.subheader("Fouling Challenge")
-        st.plotly_chart(fig, key="fc")
 ########## Static Period Caluclations #############
         # Step 1: Mark periods of inactivity
         df['inactive'] = df['speed'] < 3
@@ -508,9 +533,10 @@ if st.button("Fetch Data"):
                 'center': {'lon': inactive_periods_DF2['Longitude'].mean(), 'lat': inactive_periods_DF2['Latitude'].mean()},
                 'zoom': 2,
             },
-            showlegend=False
+            showlegend=False,
+            width=1000,    # Adjust width as needed
+            height=1000    # Same height to make it square
         )
-
 
         st.subheader("🗺️ Vessel Static Map")
         st.plotly_chart(fig, key="static map")
@@ -546,11 +572,14 @@ if st.button("Fetch Data"):
                           yaxis_title="Frequency",
                           font=dict(color='black',size=14),  # Set the font color to black and size to 12
                           width=500,  # Set the width of the figure to make the graph longer
-                          height=300   # Optionally set the height of the figure
+                          height=500   # Optionally set the height of the figure
         )
+        # Display the chart in half the page
+        col1, col2 = st.columns([1, 1])  # Two equal-width columns
 
-        st.subheader("STATIONARY PERIODS")
-        st.plotly_chart(fis,  key="staticdays")
+        with col1:  # or use col2 if you prefer
+            st.subheader("STATIONARY PERIODS")
+            st.plotly_chart(fis,  key="staticdays")
 
 ########## STATIC CHART ########
         
@@ -561,6 +590,8 @@ if st.button("Fetch Data"):
         
         # Select relevant columns
         bigstatics2 = bigstatics2[['Days', 'Fouling Challenge', 'Begin', 'End']]
+        bigstatics2.sort_values(by='Days', ascending=False, inplace=True)   
 
-        st.subheader("Static Days")
-        st.dataframe(bigstatics2)
+        with col2:
+            st.subheader("Static Days")
+            st.dataframe(bigstatics2)

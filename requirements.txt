@@ -1,1 +1,11 @@
 streamlit
+requests
+pandas
+geopandas
+shapely
+fiona
+pyproj
+numpy
+plotly
+urllib3
+openpyxl

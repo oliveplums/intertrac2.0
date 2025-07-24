@@ -9,4 +9,3 @@ numpy
 plotly
 urllib3
 streamlit_authenticator
-plotly.colors

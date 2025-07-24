@@ -13,6 +13,8 @@ from shapely.geometry import Point
 import plotly.graph_objects as go
 import numpy as np
 import math
+import bisect
+import plotly.colors as pc
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -120,6 +122,7 @@ correct_ids = pd.DataFrame({
         46, 19, 29, 58, 49, 61, 16
     ]
 })
+
 # --- Streamlit UI ---
 st.title("🚢 AIS Dashboard")
 
@@ -128,7 +131,7 @@ password = st.secrets["password"]
 
 imo_input = st.text_input("IMO number(s) (comma separated)", value="9770634")
 start_date = st.date_input("Start Date", value=datetime(2025, 7, 1))
-end_date = st.date_input("End Date", value=datetime(2025, 7, 22))
+end_date = st.date_input("End Date", value=datetime.today())
 sixhourly = st.selectbox("6-Hourly data?", options=["true", "false"], index=0)
 
 # Session state handling for the checkbox
@@ -239,13 +242,21 @@ if st.button("Fetch Data"):
             
 ##############Speed and Activity Summary#######################
         st.set_page_config(layout="wide")
-        # Time difference between points
-        
-        #df_ais = df_ais[df_ais["speed"] < 30]
         
         df_ais['Diff'] = df_ais['DateTime'].diff().fillna(pd.Timedelta(0))
 
-        
+        # 3. Calculate Time Difference
+        diff=[]
+
+        for n in range(len(df_ais['DateTime'])-1):
+            diff.append(df_ais['DateTime'].iloc[n+1]-df_ais['DateTime'].iloc[n])
+        diff=[timedelta(days=0, seconds=0, microseconds=0, milliseconds=0, minutes=0, hours=0, weeks=0)] + diff
+        df_ais['Time Spent'] = diff
+        df_ais['Time Spent (Hours)'] = df_ais['Time Spent'].dt.total_seconds() / 3600
+        df_ais['SeaMiles'] = df_ais['speed']*df_ais['Time Spent'].dt.total_seconds()*0.0002777778
+
+
+
         # Distance in nautical miles (speed in knots * hours)
         df_ais['distance'] = df_ais['speed'] * 0.0002777778 * df_ais['Diff'].dt.total_seconds()
         
@@ -292,14 +303,59 @@ if st.button("Fetch Data"):
         st.subheader("📈 Speed and Activity Summary")
         st.dataframe(styled_df, use_container_width=True)
 
+########## Static Period Caluclations #############
+        df=df_ais.copy()
+
+        # Step 1: Mark periods of inactivity
+        df['inactive'] = df['speed'] < 3
+        
+        # Step 2: Shift the 'inactive' column to detect changes
+        df['inactive_shifted'] = df['inactive'].shift(1, fill_value=False)
+        
+        # Step 3: Identify start and end of inactive periods
+        df['period_start'] = (~df['inactive_shifted'] & df['inactive'])
+        df['period_end'] = (df['inactive_shifted'] & ~df['inactive'])
+        
+        # Step 4: Initialize variables to track inactive periods
+        inactive_periods = []
+        period_start = None
+        
+        # Step 5: Loop through the DataFrame to extract periods of inactivity
+        for i, row in df.iterrows():
+            if row['period_start']:
+                period_start = row['DateTime']
+            if row['period_end'] and period_start is not None:
+                period_end = row['DateTime']
+                # Calculate duration in days as decimal (including hours, minutes, seconds)
+                duration = (pd.to_datetime(period_end) - pd.to_datetime(period_start)).total_seconds() / (24 * 3600)
+                fouling_challenge = row['risk']
+                longitude = row['longitude']
+                latitude = row['latitude']
+                inactive_periods.append((period_start, period_end, duration, fouling_challenge, longitude, latitude))
+                period_start = None
+
+        # Handle ongoing period case similarly
+        if period_start is not None:
+            period_end = df['DateTime'].iloc[-1]
+            duration = (pd.to_datetime(period_end) - pd.to_datetime(period_start)).total_seconds() / (24 * 3600)
+            fouling_challenge = df['risk'].iloc[-1]
+            longitude = df['longitude'].iloc[-1]
+            latitude = df['latitude'].iloc[-1]
+            inactive_periods.append((period_start, period_end, duration, fouling_challenge, longitude, latitude))
+
+        # Create DataFrame with decimal day durations
+        columns = ['Begin', 'End', 'Days', 'Fouling Challenge', 'Longitude', 'Latitude']
+        inactive_periods_df = pd.DataFrame(inactive_periods, columns=columns)
+
+        # Filter for periods >= 14 days (decimal)
+        inactive_periods_df = inactive_periods_df[inactive_periods_df['Days'] > 0]
+        inactive_periods_DF2 = inactive_periods_df[inactive_periods_df['Days'] >= 14]
 
 #####MAP###############
 
         # Define colors for each risk level
         colours = {'null': 'grey', 'VL': 'darkgreen', 'L': '#37ff30', 'M': 'yellow', 'H': 'orange', 'VH': 'red'}
         
-        # Make sure you're using the correct dataframe
-        df = df_ais.copy()
         
         # Handle potential missing values in 'risk'
         df['risk'] = df['risk'].fillna('VL')
@@ -322,6 +378,8 @@ if st.button("Fetch Data"):
         lon_range = lon_max - lon_min
         lat_range = lat_max - lat_min
         zoom = calculate_zoom_level(lon_range, lat_range)
+        
+
         
         # Create the Scattermapbox figure
         fig = go.Figure(go.Scattermapbox(
@@ -394,8 +452,24 @@ if st.button("Fetch Data"):
                 line=dict(color=color, width=2),
                 name=str(risk_value)
             ))
-        
-        
+
+        if not inactive_periods_DF2.empty:
+            y_min, y_max = 0, df['speed'].max() + 2  # Adjust 2 knots margin if you want
+            
+            for _, row in inactive_periods_DF2.iterrows():
+                fig.add_shape(
+                    type='rect',
+                    xref='x',
+                    yref='y',
+                    x0=row['Begin'],
+                    x1=row['End'],
+                    y0=y_min,
+                    y1=y_max,
+                    fillcolor='rgba(0, 0, 255, 0.2)',  # blue with 0.2 alpha
+                    line=dict(width=0),
+                    layer='below'
+                )
+                
         
         # Customize plot title and labels
         fig.update_layout(title='Speed Timeline',
@@ -408,6 +482,167 @@ if st.button("Fetch Data"):
         )
         st.subheader("Speed Timeline")
         st.plotly_chart(fig, key="speed timeline")
+
+########### SMM Timeline #########################
+
+
+        # Format the month-year from DateTime
+        df['months'] = pd.to_datetime(df['DateTime'].dt.date).apply(lambda x: x.strftime('%b-%y'))
+
+        # Sum sea miles by month and save as new df
+        response_data_frame = df.groupby('months')['SeaMiles'].sum()
+        SMMdf = pd.DataFrame(response_data_frame).reset_index()
+
+        # Convert months to datetime and sort
+        SMMdf['ActMonths'] = pd.to_datetime(SMMdf['months'], format='%b-%y')
+        SMMdf = SMMdf.sort_values(by='ActMonths').reset_index(drop=True)
+
+
+
+        # Create Plotly bar chart
+        fig = px.bar(
+            SMMdf,
+            x='ActMonths',
+            y='SeaMiles',
+            labels={'ActMonths': 'Date', 'SeaMiles': 'Sea Miles'},
+            title='SMM Timeline',
+            color_discrete_sequence=['rgb(0, 81, 146)']
+        )
+
+        # Add average line
+        fig.add_hrect(
+            y0=smm, y1=smm,  # Same value to show a line
+            line_dash="dot",
+            line_color="red",
+            annotation_text="Avg Sea Miles",
+            annotation_position="top right",
+        )
+
+        # Format x-axis
+        fig.update_layout(
+            xaxis_tickformat="%b %Y",
+            xaxis_title="Date",
+            yaxis_title="Sea Miles",
+            bargap=0.2,
+            showlegend=False,
+            width=1000,  # Set the width of the figure to make the graph longer
+            height=500   # Optionally set the height of the figure
+        )
+
+        fig.update_xaxes(tickangle=45)
+
+        # Show in Streamlit
+        st.subheader("SMM Timeline")
+        st.plotly_chart(fig, use_container_width=True, key="SMM timeline")
+
+########### Monthly Fouling Risk Timeline #########################
+
+
+       # --- Mapping risk levels ---
+        RISK_ranges = {'VL': 1, 'L': 2, 'M': 3, 'H': 4, 'VH': 5}
+        df['risk_level'] = df['risk'].map(RISK_ranges)
+        df2 = df.copy()
+
+        # Daily average
+        df2['Day'] = df2['DateTime'].dt.to_period('D')
+        daily_data = df2[['Day', 'risk_level', 'speed']].groupby('Day').mean().reset_index()
+
+        # --- Define Speed and Risk index functions ---
+        def get_Speed_index(speeds):
+            return bisect.bisect_right([5, 10, 15], speeds)
+
+        def get_risk_index(risks):
+            return bisect.bisect_right([1, 2, 3, 4], risks)
+
+        # --- Base risk table ---
+        base_risks = {
+            (4, 5): [1.00, 0.20, 0.10, 0.04],
+            (3, 4): [0.99, 0.29, 0.09, 0.03],
+            (2, 3): [0.98, 0.28, 0.08, 0.02],
+            (1, 2): [0.97, 0.27, 0.07, 0.01],
+            (0, 1): [0.98, 0.26, 0.06, 0.00]
+        }
+
+        # Compute base risk
+        daily_data['risk_index'] = daily_data['risk_level'].apply(get_risk_index)
+        daily_data['Speed_index'] = daily_data['speed'].apply(get_Speed_index)
+
+        def lookup_base_risk(row):
+            key = (row['risk_index'], row['risk_index'] + 1)
+            return base_risks.get(key, [0, 0, 0, 0])[row['Speed_index']]
+
+        daily_data['base_risk'] = daily_data.apply(lookup_base_risk, axis=1)
+
+        # Monthly averages
+        daily_data['Month'] = daily_data['Day'].dt.to_timestamp().dt.to_period('M')
+        monthly_data = daily_data[['Month', 'base_risk']].groupby('Month').mean().reset_index()
+        monthly_data['Month'] = monthly_data['Month'].dt.to_timestamp()
+
+        # --- Color function ---
+        colorscale = pc.get_colorscale('RdYlGn_r')
+
+        def risk_to_color_hex(risk):
+            rgb_string = pc.sample_colorscale(colorscale, [risk])[0]
+            if isinstance(rgb_string, str) and rgb_string.startswith('rgb'):
+                nums = [int(n) for n in rgb_string.strip('rgb()').split(',')]
+                return '#{:02x}{:02x}{:02x}'.format(*nums)
+            return rgb_string
+
+        # Prepare plot data
+        x = monthly_data['Month']
+        y = monthly_data['base_risk']
+        colors = [risk_to_color_hex(r) for r in y]
+
+        # 1 day in milliseconds = 86400000
+        bar_width_ms = 86400000 * 5  # 5 days width
+
+        # Build Plotly figure
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=x,
+            y=y,
+            marker_color=colors,
+            width=bar_width_ms,
+            marker_line_color='black',
+            marker_line_width=0.3,
+            name='Base Risk',
+            hovertemplate='%{x|%b %Y}<br>Risk: %{y:.2f}<extra></extra>'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=x,
+            y=y,
+            mode='markers',
+            marker=dict(color='black', size=8),
+            name='Risk Dots',
+            hoverinfo='skip'
+        ))
+
+        fig.update_layout(
+            title='Monthly Fouling Risk',
+            xaxis=dict(
+                title='Month',
+                tickformat='%b %Y',
+                tickangle=20,
+                showgrid=False
+            ),
+            yaxis=dict(
+                title='Fouling Risk',
+                range=[0, 1],
+                showgrid=False
+            ),
+            bargap=0.05,
+            plot_bgcolor='white',
+            showlegend=False,
+            margin=dict(l=40, r=20, t=40, b=40),
+            width=1000,  # Set the width of the figure to make the graph longer
+            height=500   # Optionally set the height of the figure
+        )
+
+        # Streamlit app UI
+        st.title("Fouling Risk Monthly Chart")
+        st.plotly_chart(fig, use_container_width=True)
 
 ########### Speed Histogram #########################
 
@@ -438,6 +673,7 @@ if st.button("Fetch Data"):
         with col1:  # or use col2 if you prefer
             st.subheader("Speed Histogram")
             st.plotly_chart(histfig, use_container_width=True, key="speed hist")
+
 
 
 ########## Fouling Challenge #############
@@ -483,53 +719,8 @@ if st.button("Fetch Data"):
             st.subheader("Fouling Challenge")
             st.plotly_chart(fig, key="fc")
 
-########## Static Period Caluclations #############
-        # Step 1: Mark periods of inactivity
-        df['inactive'] = df['speed'] < 3
-        
-        # Step 2: Shift the 'inactive' column to detect changes
-        df['inactive_shifted'] = df['inactive'].shift(1, fill_value=False)
-        
-        # Step 3: Identify start and end of inactive periods
-        df['period_start'] = (~df['inactive_shifted'] & df['inactive'])
-        df['period_end'] = (df['inactive_shifted'] & ~df['inactive'])
-        
-        # Step 4: Initialize variables to track inactive periods
-        inactive_periods = []
-        period_start = None
-        
-        # Step 5: Loop through the DataFrame to extract periods of inactivity
-        for i, row in df.iterrows():
-            if row['period_start']:
-                period_start = row['DateTime']
-            if row['period_end'] and period_start is not None:
-                period_end = row['DateTime']
-                # Calculate the duration in days
-                days = (pd.to_datetime(period_end) - pd.to_datetime(period_start)).days
-                # Extract the fouling challenge at the end of the period
-                fouling_challenge = row['risk']
-                # Extract longitude and latitude
-                longitude = row['longitude']
-                latitude = row['latitude']
-                inactive_periods.append((period_start, period_end, days, fouling_challenge, longitude, latitude))
-                period_start = None
-        
-        # Handle case where a period is still ongoing
-        if period_start is not None:
-            period_end = df['DateTime'].iloc[-1]
-            days = (pd.to_datetime(period_end) - pd.to_datetime(period_start)).days
-            fouling_challenge = df['risk'].iloc[-1]
-            longitude = df['longitude'].iloc[-1]
-            latitude = df['latitude'].iloc[-1]
-            inactive_periods.append((period_start, period_end, days, fouling_challenge, longitude, latitude))
-        
-        # Step 6: Create a DataFrame for the inactive periods
-        columns = ['Begin', 'End', 'Days', 'Fouling Challenge', 'Longitude', 'Latitude']
-        inactive_periods_df = pd.DataFrame(inactive_periods, columns=columns)
 
 ########## Static Period Map #############
-
-        inactive_periods_DF2 = inactive_periods_df[inactive_periods_df['Days'] >= 14]
         
         # Define colors for each risk level
         colours = {'null': 'grey', 'VL': 'darkgreen', 'L': '#37ff30', 'M': 'yellow', 'H': 'orange', 'VH': 'red'}
@@ -572,44 +763,76 @@ if st.button("Fetch Data"):
         st.plotly_chart(fig, key="static map")
 
 ########## Static Period graph #############
+        # Example FC_col color palette - replace with your own colors
+        def rgb_to_hex(rgb_tuple):
+            return '#{:02x}{:02x}{:02x}'.format(
+                int(rgb_tuple[0]*255),
+                int(rgb_tuple[1]*255),
+                int(rgb_tuple[2]*255)
+            )
+        fouling_order = ['VL', 'L', 'M', 'H', 'VH']
+        color_mapping = dict(zip(fouling_order, [rgb_to_hex(c) for c in akzo_primary]))
+        
 
-        daycount=np.asarray(pd.cut(inactive_periods_df['Days'].values, [0,13, 21, 30, np.inf], include_lowest=True).value_counts())
-        x=['1-13','14-21', '22-30', '>30']
-        y=[daycount[0], daycount[1], daycount[2], daycount[3]]
-        
-        # Create the bar plot with custom colors and outlined bars
-        fis = go.Figure(data=[go.Bar(x=x, y=y, 
-                                     marker_color=['white', 'grey', 'blue', 'darkblue'],
-                                     marker_line_color='black',  # Add black outline
-                                     marker_line_width=1)])  # Adjust the width of the outline if needed
-        
-        
-        
-        # Add value labels above each bar
-        for i, val in enumerate(y):
-            fis.add_annotation(
-                x=x[i],
-                y=val,
-                text=f'{int(val)}',
+        bins = [0, 13, 21, 30, np.inf]
+        labels = ['1-13', '14-21', '22-30', '>30']
+        inactive_periods_df['RestPeriod'] = pd.cut(inactive_periods_df['Days'], bins=bins, labels=labels, include_lowest=True)
+        static_periods = inactive_periods_df.copy()
+
+        static_periods['RestPeriod'] = pd.Categorical(static_periods['RestPeriod'], categories=labels, ordered=True)
+
+        # Prepare data for stacking: count of each fouling challenge per RestPeriod
+        count_df = (static_periods[static_periods['Days'] != 0]
+                    .groupby(['RestPeriod', 'Fouling Challenge'])
+                    .size()
+                    .unstack(fill_value=0)
+                    .reindex(labels)  # Ensure all bins appear in order
+                    .fillna(0))
+
+        # Build the stacked bar chart traces
+        fig = go.Figure()
+
+        for fc in fouling_order:
+            fig.add_trace(go.Bar(
+                x=labels,
+                y=count_df[fc] if fc in count_df.columns else [0]*len(labels),
+                name=fc,
+                marker_color=color_mapping[fc],
+                marker_line_color='black',
+                marker_line_width=1
+            ))
+
+        # Add total counts above each stacked bar
+        totals = count_df.sum(axis=1)
+        for i, label in enumerate(labels):
+            fig.add_annotation(
+                x=label,
+                y=totals[label],
+                text=str(totals[label]),
                 showarrow=False,
                 font=dict(color='black', size=14),
                 yshift=10
             )
-        
-        # Customize plot title and labels
-        fis.update_layout(title="STATIONARY PERIODS", xaxis_title='Days At Rest', 
-                          template='plotly_white', autosize=False, bargap=0.30,
-                          yaxis_title="Frequency",
-                          font=dict(color='black',size=14),  # Set the font color to black and size to 12
-                          width=500,  # Set the width of the figure to make the graph longer
-                          height=500   # Optionally set the height of the figure
-        )
-        # Display the chart in half the page
-        col1, col2 = st.columns([1, 1])  # Two equal-width columns
 
-        with col1:  # or use col2 if you prefer
-            st.subheader("STATIONARY PERIODS")
-            st.plotly_chart(fis,  key="staticdays")
+        fig.update_layout(
+            barmode='stack',
+            title="Static Periods by Fouling Challenge",
+            xaxis_title='Static Periods (Days at Rest)',
+            yaxis_title='Frequency',
+            template='plotly_white',
+            bargap=0.3,
+            font=dict(color='black', size=14),
+            width=600,
+            height=500,
+            legend_title_text='Fouling Challenge'
+        )
+
+        # Streamlit display in two equal columns
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.subheader("Static Periods Stacked by Fouling Challenge")
+            st.plotly_chart(fig, use_container_width=True)
+
 
 ########## STATIC CHART ########
         

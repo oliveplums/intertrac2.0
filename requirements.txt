@@ -8,5 +8,6 @@ pyproj
 numpy
 plotly
 urllib3
-openpyxl
-streamlit-authenticator
+streamlit_authenticator
+bisect
+plotly.colors

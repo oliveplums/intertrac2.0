@@ -130,7 +130,7 @@ username = st.secrets["username"]
 password = st.secrets["password"]
 
 imo_input = st.text_input("IMO number(s) (comma separated)", value="9770634")
-start_date = st.date_input("Start Date", value=datetime(2025, 7, 1))
+start_date = st.date_input("Start Date", value=datetime(2025, 2, 1))
 end_date = st.date_input("End Date", value=datetime.today())
 sixhourly = st.selectbox("6-Hourly data?", options=["true", "false"], index=0)
 
@@ -234,6 +234,28 @@ if st.button("Fetch Data"):
 
                     df_ais['risk'] = b
 
+                    last_known_risk = None
+                    new_risks = []
+
+                    for i in range(len(df_ais)):
+                        current_risk = df_ais.at[i, 'risk']
+                        current_speed = df_ais.at[i, 'speed']  # assuming column name is 'speed'
+                        
+                        if pd.isna(current_risk):
+                            if current_speed == 0 and last_known_risk is not None:
+                                new_risks.append(last_known_risk)
+                            elif current_speed > 0:
+                                new_risks.append('VL')
+                            else:
+                                new_risks.append(None)
+                        else:
+                            new_risks.append(current_risk)
+                            if current_speed > 0:
+                                last_known_risk = current_risk  # update last known risk when speed is non-zero
+
+                    df_ais['risk'] = new_risks
+
+
                 except Exception as e:
                     st.error(f"Geospatial or Excel error: {e}")
         except Exception as e:
@@ -318,21 +340,26 @@ if st.button("Fetch Data"):
         
         # Step 4: Initialize variables to track inactive periods
         inactive_periods = []
-        period_start = None
-        
+
         # Step 5: Loop through the DataFrame to extract periods of inactivity
+        period_start = None
+        start_risk = None  # Store fouling_challenge from the period_start row
+
         for i, row in df.iterrows():
             if row['period_start']:
                 period_start = row['DateTime']
+                start_risk = row['risk']  # Capture the risk at the start
             if row['period_end'] and period_start is not None:
                 period_end = row['DateTime']
-                # Calculate duration in days as decimal (including hours, minutes, seconds)
+
+                # Calculate duration in days (as decimal)
                 duration = (pd.to_datetime(period_end) - pd.to_datetime(period_start)).total_seconds() / (24 * 3600)
-                fouling_challenge = row['risk']
                 longitude = row['longitude']
                 latitude = row['latitude']
+                fouling_challenge = start_risk  # Use the risk from the period_start row
                 inactive_periods.append((period_start, period_end, duration, fouling_challenge, longitude, latitude))
                 period_start = None
+                start_risk = None  # Reset after saving
 
         # Handle ongoing period case similarly
         if period_start is not None:
@@ -356,10 +383,7 @@ if st.button("Fetch Data"):
         # Define colors for each risk level
         colours = {'null': 'grey', 'VL': 'darkgreen', 'L': '#37ff30', 'M': 'yellow', 'H': 'orange', 'VH': 'red'}
         
-        
-        # Handle potential missing values in 'risk'
-        df['risk'] = df['risk'].fillna('VL')
-        
+
         # Compute the bounds of the data
         lon_min, lon_max = df['longitude'].min(), df['longitude'].max()
         lat_min, lat_max = df['latitude'].min(), df['latitude'].max()
@@ -782,7 +806,7 @@ if st.button("Fetch Data"):
         static_periods['RestPeriod'] = pd.Categorical(static_periods['RestPeriod'], categories=labels, ordered=True)
 
         # Prepare data for stacking: count of each fouling challenge per RestPeriod
-        count_df = (static_periods[static_periods['Days'] != 0]
+        count_df = (static_periods
                     .groupby(['RestPeriod', 'Fouling Challenge'])
                     .size()
                     .unstack(fill_value=0)

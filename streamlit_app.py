@@ -119,6 +119,7 @@ correct_ids = pd.DataFrame({
         28, 45, 23, 9, 7, 2, 33, 43, 26, 48,
         46, 19, 29, 58, 49, 61, 16
     ]
+})
 # --- Streamlit UI ---
 st.title("🚢 AIS Dashboard")
 

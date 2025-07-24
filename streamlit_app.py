@@ -92,7 +92,33 @@ def fetch_and_combine_ais(username, password, timestamp_changes, start, end, six
     df = df.drop_duplicates(subset='DateTime').sort_values('DateTime').reset_index(drop=True)
     return df
 
-
+correct_ids = pd.DataFrame({
+    "LME_NAME": [
+        "Agulhas Current", "Aleutian Islands", "Antarctica", "Arabian Sea", "Central Arctic",
+        "Baltic Sea", "Barents Sea", "Bay of Bengal", "Beaufort Sea", "Benguela Current",
+        "Black Sea", "California Current", "Canary Current", "Caribbean Sea", "Celtic-Biscay Shelf",
+        "Northern Bering - Chukchi Seas", "East Bering Sea", "East Brazil Shelf", "East Central Australian Shelf", 
+        "East China Sea", "Greenland Sea", "East Siberian Sea", "Faroe Plateau", "Guinea Current",
+        "Gulf of Alaska", "Gulf of California", "Gulf of Mexico", "Gulf of Thailand", "Hudson Bay Complex",
+        "Humboldt Current", "Iberian Coastal", "Iceland Shelf and Sea", "Indonesian Sea", "Insular Pacific-Hawaiian",
+        "Kara Sea", "Kuroshio Current", "Laptev Sea", "Mediterranean Sea", "New Zealand Shelf",
+        "Labrador - Newfoundland", "North Australian Shelf", "North Brazil Shelf", "Canadian High Arctic - North Greenland",
+        "North Sea", "Northeast Australian Shelf", "Northeast U.S. Continental Shelf", "Northwest Australian Shelf",
+        "Norwegian Sea", "Oceanic (open ocean)", "Oyashio Current", "Pacific Central-American Coastal",
+        "Patagonian Shelf", "Red Sea", "Scotian Shelf", "Sea of Japan", "Sea of Okhotsk",
+        "Somali Coastal Current", "South Brazil Shelf", "South China Sea", "South West Australian Shelf",
+        "Southeast Australian Shelf", "Southeast U.S. Continental Shelf", "Sulu-Celebes Sea", "West Bering Sea",
+        "West Central Australian Shelf", "Canadian Eastern Arctic - West Greenland", "Yellow Sea"
+    ],
+    "LME_NUMBER": [
+        40, 59, 47, 22, 65, 1, 54, 27, 63, 37,
+        11, 10, 17, 25, 6, 66, 60, 35, 42, 18,
+        52, 57, 50, 32, 4, 20, 21, 30, 62, 36,
+        14, 51, 34, 24, 55, 15, 56, 13, 44, 5,
+        38, 31, 64, 3, 39, 12, 41, 53, 0, 8,
+        28, 45, 23, 9, 7, 2, 33, 43, 26, 48,
+        46, 19, 29, 58, 49, 61, 16
+    ]
 # --- Streamlit UI ---
 st.title("🚢 AIS Dashboard")
 
@@ -165,6 +191,10 @@ if st.button("Fetch Data"):
                     LMEPolygon_path = os.path.abspath(LMEPolygon)
                     LME_sf = gpd.read_file(LMEPolygon_path)
                     LEM_gsd_new = LME_sf.to_crs(epsg=4326)
+
+                    LEM_gsd_new.dropna(subset=['OBJECTID'], inplace=True)
+                    LEM_gsd_new.drop(columns=['LME_NUMBER'], inplace=True)
+                    LEM_gsd_new = LEM_gsd_new.merge(correct_ids, on="LME_NAME", how="left")
 
                     LME = pd.read_excel("LME values.xlsx")
                     LME.columns = LME.iloc[0]

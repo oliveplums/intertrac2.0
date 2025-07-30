@@ -234,23 +234,30 @@ if st.button("Fetch Data"):
 
                     df_ais['risk'] = b
 
+                    # Precompute the next known risk for each row (forward fill backward)
+                    next_known_risks = df_ais['risk'].fillna(method='bfill')
+                    
                     last_known_risk = None
                     new_risks = []
-
+                    
                     for i in range(len(df_ais)):
                         current_risk = df_ais.at[i, 'risk']
-                        current_speed = df_ais.at[i, 'speed']  # assuming column name is 'speed'
+                        current_speed = df_ais.at[i, 'speed']
                         
                         if pd.isna(current_risk):
-                            if current_speed == 0 and last_known_risk is not None:
-                                new_risks.append(last_known_risk)
+                            if current_speed == 0:
+                                if last_known_risk is not None:
+                                    new_risks.append(last_known_risk)
+                                else:
+                                    # Use next known risk from future rows if last_known_risk not available
+                                    new_risks.append(next_known_risks.iat[i])
                             else:
                                 new_risks.append('VL')
                         else:
                             new_risks.append(current_risk)
                             if current_speed > 0:
-                                last_known_risk = current_risk  # update last known risk when speed is non-zero
-
+                                last_known_risk = current_risk
+                    
                     df_ais['risk'] = new_risks
 
 

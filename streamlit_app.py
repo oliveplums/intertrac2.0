@@ -26,8 +26,8 @@ def fetch_and_combine_ais(username, password, timestamp_changes, start_date, end
 
 # ---- Streamlit UI ----
 st.title("AIS Risk Processing App")
-username = st.text_input("Username")
-password = st.text_input("Password", type="password")
+username = st.secrets["username"]
+password = st.secrets["password"]
 imo_input = st.text_input("IMO numbers (comma-separated)")
 start_date = st.date_input("Start Date", datetime.today() - timedelta(days=30))
 end_date = st.date_input("End Date", datetime.today())

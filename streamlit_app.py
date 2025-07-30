@@ -234,22 +234,21 @@ if st.button("Fetch Data"):
 
                     df_ais['risk'] = b
 
-                    # Precompute the next known risk for each row (forward fill backward)
+                    # Precompute the next known risk using backward fill
                     next_known_risks = df_ais['risk'].fillna(method='bfill')
                     
-                    last_known_risk = None
-                    new_risks = []
+                    # Create a copy of the current 'risk' column to modify
+                    new_risks = df_ais['risk'].copy()
                     
+                    # Apply logic to fill in missing risk values
                     for i in range(len(df_ais)):
-                        current_risk = df_ais.at[i, 'risk']
-                        current_speed = df_ais.at[i, 'speed']
-                        
-                        if pd.isna(current_risk):
-                            if current_speed == 0:
-                                new_risks.append(next_known_risks.iat[i])
+                        if pd.isna(new_risks.iat[i]):
+                            if df_ais.iat[i, df_ais.columns.get_loc('speed')] == 0:
+                                new_risks.iat[i] = next_known_risks.iat[i]
                             else:
-                                new_risks.append('VL')
-
+                                new_risks.iat[i] = 'VL'
+                    
+                    # Assign the new risk values back
                     df_ais['risk'] = new_risks
 
 

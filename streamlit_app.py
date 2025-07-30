@@ -450,65 +450,82 @@ if st.button("Fetch Data"):
         
         # Sort the DataFrame by 'DateTime'
         df = df.sort_values('DateTime')
+       
+        # Dropdown to select time range
+        time_range = st.selectbox("Select time range view:", 
+                                  ['6 hours', '24 hours', '1 week', '1 month', '1 year'])
         
-        # Define the color palette
-        akzo_primary = [(51/255, 102/255, 0/255), (0/255, 255/255, 0/255), (255/255, 255/255, 0/255), (255/255, 153/255, 0/255), (255/255, 0/255, 0/255),(0/255, 81/255, 146/255)]
+        # Get the max datetime in the df to use as the end point
+        max_date = df['DateTime'].max()
         
-        # Define the order of the 'Fouling Challenge' categories
+        # Define time delta based on selection
+        if time_range == '6 hours':
+            start_date = max_date - timedelta(hours=6)
+        elif time_range == '24 hours':
+            start_date = max_date - timedelta(days=1)
+        elif time_range == '1 week':
+            start_date = max_date - timedelta(weeks=1)
+        elif time_range == '1 month':
+            start_date = max_date - timedelta(days=30)  # Approximate 1 month as 30 days
+        elif time_range == '1 year':
+            start_date = max_date - timedelta(days=365)  # Approximate 1 year as 365 days
+        
+        # Filter dataframe to the selected time range
+        df_filtered = df[df['DateTime'] >= start_date]
+        
+        # Then use df_filtered instead of df for plotting
+        
+        # Define color palette and mappings again if needed
+        akzo_primary = [(51/255, 102/255, 0/255), (0/255, 255/255, 0/255), (255/255, 255/255, 0/255), 
+                        (255/255, 153/255, 0/255), (255/255, 0/255, 0/255), (0/255, 81/255, 146/255)]
+        
         fouling_challenge_order = ['VL', 'L', 'M', 'H', 'VH']
-        
-        # Create a dictionary that maps each category to a color
         color_map = dict(zip(fouling_challenge_order, akzo_primary[:5]))
         
-        # Filter DataFrame to only include rows where 'Speed' is less than or equal to 30
-        df = df[df['speed'] <= 30]
+        df_filtered = df_filtered[df_filtered['speed'] <= 30]
         
-        # Initialize figure
         fig = go.Figure()
         
-        # Plot each row as a separate line
-        for i in range(1, len(df)):
-            risk_value = df['risk'].iloc[i]
-            
-            # Convert RGB tuple to 'rgb(r, g, b)' string
-            color = color_map.get(risk_value, (0, 0, 0))  # Default to black if missing
+        for i in range(1, len(df_filtered)):
+            risk_value = df_filtered['risk'].iloc[i]
+            color = color_map.get(risk_value, (0, 0, 0))
             color = f'rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)})'
-            
             fig.add_trace(go.Scatter(
-                x=df['DateTime'].iloc[i-1:i+1], 
-                y=df['speed'].iloc[i-1:i+1],
+                x=df_filtered['DateTime'].iloc[i-1:i+1],
+                y=df_filtered['speed'].iloc[i-1:i+1],
                 mode='lines',
                 line=dict(color=color, width=2),
                 name=str(risk_value)
             ))
-
-        if not inactive_periods_DF2.empty:
-            y_min, y_max = 0, df['speed'].max() + 2  # Adjust 2 knots margin if you want
-            
-            for _, row in inactive_periods_DF2.iterrows():
-                fig.add_shape(
-                    type='rect',
-                    xref='x',
-                    yref='y',
-                    x0=row['Begin'],
-                    x1=row['End'],
-                    y0=y_min,
-                    y1=y_max,
-                    fillcolor='rgba(0, 0, 255, 0.2)',  # blue with 0.2 alpha
-                    line=dict(width=0),
-                    layer='below'
-                )
-                
         
-        # Customize plot title and labels
+        if not inactive_periods_DF2.empty:
+            y_min, y_max = 0, df_filtered['speed'].max() + 2
+            for _, row in inactive_periods_DF2.iterrows():
+                if row['End'] >= start_date:  # Only add if inactive period overlaps filtered data
+                    fig.add_shape(
+                        type='rect',
+                        xref='x',
+                        yref='y',
+                        x0=max(row['Begin'], start_date),
+                        x1=row['End'],
+                        y0=y_min,
+                        y1=y_max,
+                        fillcolor='rgba(0, 0, 255, 0.2)',
+                        line=dict(width=0),
+                        layer='below'
+                    )
+        
         fig.update_layout(title='Speed Timeline',
-            yaxis_title='Speed / knots',
-            xaxis_tickformat='%d %B %Y',template='plotly_white', autosize=False, bargap=0.30,
-                          font=dict(color='grey',size=14),
-                           showlegend=False,# Set the font color to black and size to 12
-                          width=1000,  # Set the width of the figure to make the graph longer
-                          height=500   # Optionally set the height of the figure
-        )
+                          yaxis_title='Speed / knots',
+                          xaxis_tickformat='%d %B %Y',
+                          template='plotly_white',
+                          autosize=False,
+                          bargap=0.30,
+                          font=dict(color='grey', size=14),
+                          showlegend=False,
+                          width=1000,
+                          height=500)
+        
         st.subheader("Speed Timeline")
         st.plotly_chart(fig, key="speed timeline")
 

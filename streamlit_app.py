@@ -701,7 +701,7 @@ if st.button("Fetch Data"):
 ########## Fouling Challenge #############
 
         # Define x-axis labels
-        x = ['null',, 'L', 'M', 'H', 'VH']
+        x = ['null','VL', 'L', 'M', 'H', 'VH']
         
         # Calculate the percentage weight for each risk level
         df['weight'] = (100 * df['Diff'] / df['Diff'].sum())

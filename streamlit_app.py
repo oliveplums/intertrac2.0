@@ -244,10 +244,8 @@ if st.button("Fetch Data"):
                         if pd.isna(current_risk):
                             if current_speed == 0 and last_known_risk is not None:
                                 new_risks.append(last_known_risk)
-                            elif current_speed > 0:
-                                new_risks.append('VL')
                             else:
-                                new_risks.append(None)
+                                new_risks.append('VL')
                         else:
                             new_risks.append(current_risk)
                             if current_speed > 0:
@@ -703,7 +701,7 @@ if st.button("Fetch Data"):
 ########## Fouling Challenge #############
 
         # Define x-axis labels
-        x = ['null','VL', 'L', 'M', 'H', 'VH']
+        x = ['null',, 'L', 'M', 'H', 'VH']
         
         # Calculate the percentage weight for each risk level
         df['weight'] = (100 * df['Diff'] / df['Diff'].sum())

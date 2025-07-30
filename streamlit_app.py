@@ -243,8 +243,15 @@ if st.button("Fetch Data"):
                     # Apply logic to fill in missing risk values
                     for i in range(len(df_ais)):
                         if pd.isna(new_risks.iat[i]):
-                            if df_ais.iat[i, df_ais.columns.get_loc('speed')] < 3:
+                            speed = df_ais.iat[i, df_ais.columns.get_loc('speed')]
+                            if speed < 3:
                                 new_risks.iat[i] = next_known_risks.iat[i]
+                            elif speed >= 3:
+                                # Avoid index error at i=0
+                                if i > 0 and next_known_risks.iat[i] == next_known_risks.iat[i-1]:
+                                    new_risks.iat[i] = next_known_risks.iat[i]
+                                else:
+                                    new_risks.iat[i] = 'VL'
                             else:
                                 new_risks.iat[i] = 'VL'
                     

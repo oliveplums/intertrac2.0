@@ -1,58 +1,176 @@
 import streamlit as st
 import pandas as pd
+import requests
+from datetime import datetime
+from datetime import timedelta
+from typing import Sequence
+import urllib3
+import sqlite3
 import geopandas as gpd
+import plotly.express as px
+import os 
 from shapely.geometry import Point
-from datetime import datetime, timedelta
-import os
+import plotly.graph_objects as go
+import numpy as np
+import math
+import bisect
+import plotly.colors as pc
 
-# ---- Helper Functions (mocked) ----
-def get_voyage_history(username, password, imo_list, start_date, end_date):
-    # Placeholder for actual API call
-    return []
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def detect_mmsi_changes(voyage_data, end_date):
-    # Placeholder for actual MMSI logic
-    return [[123456789, datetime.now().isoformat(), datetime.now().isoformat()]]
+# ---- API fetch functions ----
+def get_voyage_history(username: str, password: str, imo: Sequence[int], from_date: datetime, to_date: datetime):
+    imo_str = ','.join(map(str, imo))
+    url = f"https://position.stratumfive.com/ais/staticvoyage-by-imo/{imo_str}/{from_date.isoformat()}/{to_date.isoformat()}"
+    response = requests.get(url, auth=requests.auth.HTTPBasicAuth(username, password), verify=False)
+    response.raise_for_status()
+    return response.json()
 
-def fetch_and_combine_ais(username, password, timestamp_changes, start_date, end_date, sixhourly):
-    # Placeholder for actual AIS fetching logic
-    data = {
-        'DateTime': pd.date_range(start=start_date, periods=10, freq='D'),
-        'latitude': [10 + i for i in range(10)],
-        'longitude': [20 + i for i in range(10)],
-        'speed': [0, 0, 3, 4, 0, 0, 6, 7, 0, 1],
-    }
-    return pd.DataFrame(data)
+def get_ais_positions(username: str, password: str, mmsis: Sequence[int], from_date: datetime, to_date: datetime, sixhourly: str = 'true'):
+    mmsi_str = ','.join(map(str, mmsis))
+    url = f"https://position.stratumfive.com/ais/positions/{mmsi_str}/{from_date.isoformat()}/{to_date.isoformat()}?is6hourly={sixhourly}"
+    response = requests.get(url, auth=requests.auth.HTTPBasicAuth(username, password), verify=False)
+    response.raise_for_status()
+    return response.json()
 
-# ---- Streamlit UI ----
-st.title("AIS Risk Processing App")
-username = st.secrets["username"]
-password = st.secrets["password"]
-imo_input = st.text_input("IMO numbers (comma-separated)")
-start_date = st.date_input("Start Date", datetime.today() - timedelta(days=30))
-end_date = st.date_input("End Date", datetime.today())
-sixhourly = st.checkbox("Fetch every 6 hours")
-mmsi_gap_checkbox = st.checkbox("Detect MMSI Gaps")
+def detect_mmsi_changes(voyage_data, end_date: str):
+    mmsi_values = [entry['mmsi'] for entry in voyage_data]
+    mmsis = list(set(mmsi_values))
+    previous_mmsi = None
+    timestamp_changes = []
 
-# Manually loaded correction table (example)
+    for entry in voyage_data:
+        current_mmsi = entry['mmsi']
+        timestamp = entry['timestamp']
+        if current_mmsi != previous_mmsi:
+            if previous_mmsi is not None:
+                timestamp_changes.append((previous_mmsi, current_mmsi, timestamp))
+        previous_mmsi = current_mmsi
+
+    if not timestamp_changes:
+        timestamp_changes.append((mmsis[0], mmsis[0], end_date))
+    elif len(timestamp_changes) > 1:
+        source = timestamp_changes[-1][1]
+        sourcetime = timestamp_changes[-1][2]
+        for i in range(len(timestamp_changes) - 1, -1, -1):
+            if timestamp_changes[i][0] in [row[1] for row in timestamp_changes[:i]]:
+                timestamp_changes.pop(i)
+        timestamp_changes = [(timestamp_changes[0][0], source, sourcetime)]
+
+    return timestamp_changes
+
+def fetch_and_combine_ais(username, password, timestamp_changes, start, end, sixhourly):
+    df_combined = pd.DataFrame()
+    start_dt = datetime.fromisoformat(start + 'T00:00:00')
+    end_dt = datetime.fromisoformat(end + 'T00:00:00')
+
+    mmsi_list = [timestamp_changes[0][0], timestamp_changes[0][1]]
+    # If both MMSIs are the same, just keep one
+    if mmsi_list[0] == mmsi_list[1]:
+        mmsi_list = [mmsi_list[0]]
+
+    for mmsi in mmsi_list:
+        ais_data = get_ais_positions(username, password, [mmsi], start_dt, end_dt, sixhourly)
+        df = pd.DataFrame.from_dict(ais_data)
+        if df.empty:
+            continue
+
+        df['DateTime'] = pd.to_datetime(df['timestamp'])
+        df['latitude'] = df['lat']
+        df['longitude'] = df['lon']
+        df['speed'] = df['sogKts']
+        df = df[['DateTime', 'speed', 'latitude', 'longitude']]
+
+        switch_time = datetime.fromisoformat(timestamp_changes[0][2])
+        if mmsi == timestamp_changes[0][0]:
+            df = df[df['DateTime'] < switch_time]
+        else:
+            df = df[df['DateTime'] > switch_time]
+
+        df_combined = pd.concat([df_combined, df])
+
+    df_cleaned = df_combined.drop_duplicates(subset='DateTime').reset_index(drop=True)
+    df = df_cleaned[df_cleaned['speed'] < 30]
+    df = df.drop_duplicates(subset='DateTime').sort_values('DateTime').reset_index(drop=True)
+    return df
+
 correct_ids = pd.DataFrame({
-    'LME_NAME': ['LME A', 'LME B'],
-    'LME_NUMBER': [1, 2]
+    "LME_NAME": [
+        "Agulhas Current", "Aleutian Islands", "Antarctica", "Arabian Sea", "Central Arctic",
+        "Baltic Sea", "Barents Sea", "Bay of Bengal", "Beaufort Sea", "Benguela Current",
+        "Black Sea", "California Current", "Canary Current", "Caribbean Sea", "Celtic-Biscay Shelf",
+        "Northern Bering - Chukchi Seas", "East Bering Sea", "East Brazil Shelf", "East Central Australian Shelf", 
+        "East China Sea", "Greenland Sea", "East Siberian Sea", "Faroe Plateau", "Guinea Current",
+        "Gulf of Alaska", "Gulf of California", "Gulf of Mexico", "Gulf of Thailand", "Hudson Bay Complex",
+        "Humboldt Current", "Iberian Coastal", "Iceland Shelf and Sea", "Indonesian Sea", "Insular Pacific-Hawaiian",
+        "Kara Sea", "Kuroshio Current", "Laptev Sea", "Mediterranean Sea", "New Zealand Shelf",
+        "Labrador - Newfoundland", "North Australian Shelf", "North Brazil Shelf", "Canadian High Arctic - North Greenland",
+        "North Sea", "Northeast Australian Shelf", "Northeast U.S. Continental Shelf", "Northwest Australian Shelf",
+        "Norwegian Sea", "Oceanic (open ocean)", "Oyashio Current", "Pacific Central-American Coastal",
+        "Patagonian Shelf", "Red Sea", "Scotian Shelf", "Sea of Japan", "Sea of Okhotsk",
+        "Somali Coastal Current", "South Brazil Shelf", "South China Sea", "South West Australian Shelf",
+        "Southeast Australian Shelf", "Southeast U.S. Continental Shelf", "Sulu-Celebes Sea", "West Bering Sea",
+        "West Central Australian Shelf", "Canadian Eastern Arctic - West Greenland", "Yellow Sea"
+    ],
+    "LME_NUMBER": [
+        40, 59, 47, 22, 65, 1, 54, 27, 63, 37,
+        11, 10, 17, 25, 6, 66, 60, 35, 42, 18,
+        52, 57, 50, 32, 4, 20, 21, 30, 62, 36,
+        14, 51, 34, 24, 55, 15, 56, 13, 44, 5,
+        38, 31, 64, 3, 39, 12, 41, 53, 0, 8,
+        28, 45, 23, 9, 7, 2, 33, 43, 26, 48,
+        46, 19, 29, 58, 49, 61, 16
+    ]
 })
 
+# --- Streamlit UI ---
+st.title("🚢 AIS Dashboard")
+
+username = st.secrets["username"]
+password = st.secrets["password"]
+
+imo_input = st.text_input("IMO number(s) (comma separated)", value="9770634")
+start_date = st.date_input("Start Date", value=datetime(2025, 2, 1))
+end_date = st.date_input("End Date", value=datetime.today())
+sixhourly = st.selectbox("6-Hourly data?", options=["true", "false"], index=0)
+
+# Session state handling for the checkbox
+if "mmsi_gap_enabled" not in st.session_state:
+    st.session_state["mmsi_gap_enabled"] = False
+
+# Now show the checkbox, linked to session state
+mmsi_gap_checkbox = st.checkbox("Check MMSI Change: Gap Search", value=st.session_state["mmsi_gap_enabled"])
+
+            
 if st.button("Fetch Data"):
     with st.spinner("Fetching voyage and AIS data..."):
         try:
             imo_list = list(map(int, imo_input.split(',')))
-
-            if mmsi_gap_checkbox:
+                
+            # Always get voyage_data
+            if mmsi_gap_checkbox==True:
                 voyage_data = get_voyage_history(username, password, imo_list, start_date, end_date)
                 timestamp_changes = detect_mmsi_changes(voyage_data, end_date.isoformat())
             else:
-                days_ago = end_date - timedelta(days=10)
+                days_ago = end_date- timedelta(days=10)
                 voyage_data = get_voyage_history(username, password, imo_list, days_ago, end_date)
                 timestamp_changes = detect_mmsi_changes(voyage_data, end_date.isoformat())
+                
+# ---- SQLite vessel info ----
+            # try:
+            #     imo_for_db = imo_list[0]
+            #     with sqlite3.connect("my_sqlite.db") as cnn:
+            #         query = f"SELECT * FROM vesselInfo WHERE LRIMOShipNo = {imo_for_db};"
+            #         dfVesselInfo = pd.read_sql(query, cnn)
 
+            #     if not dfVesselInfo.empty:
+            #         st.subheader("📄 Vessel Information from Local DB")
+            #         st.dataframe(dfVesselInfo)
+            #     else:
+            #         st.warning(f"No vessel info found in local DB for IMO {imo_for_db}")
+            # except Exception as e:
+            #     st.error(f"SQLite DB error: {e}")
+        
             if not timestamp_changes or len(timestamp_changes[0]) < 3:
                 st.error("Unable to detect MMSI transitions – voyage data might be incomplete or invalid.")
             else:
@@ -63,92 +181,86 @@ if st.button("Fetch Data"):
                     end_date.isoformat(),
                     sixhourly
                 )
-
+        
                 if df_ais.empty:
                     st.warning("No AIS position data found for the selected criteria.")
                 else:
                     st.success("AIS Data fetched successfully!")
 
+
+
                 # ---- LME Shapefile and Excel Info ----
-                LMEPolygon = "LMEPolygon1/LMEs66.shp"
-                LMEPolygon_path = os.path.abspath(LMEPolygon)
-                LME_sf = gpd.read_file(LMEPolygon_path)
-                LEM_gsd_new = LME_sf.to_crs(epsg=4326)
+                try:
+                    LMEPolygon = "LMEPolygon1/LMEs66.shp"
+                    LMEPolygon_path = os.path.abspath(LMEPolygon)
+                    LME_sf = gpd.read_file(LMEPolygon_path)
+                    LEM_gsd_new = LME_sf.to_crs(epsg=4326)
 
-                LEM_gsd_new.dropna(subset=['OBJECTID'], inplace=True)
-                LEM_gsd_new.drop(columns=['LME_NUMBER'], inplace=True)
-                LEM_gsd_new = LEM_gsd_new.merge(correct_ids, on="LME_NAME", how="left")
+                    LEM_gsd_new.dropna(subset=['OBJECTID'], inplace=True)
+                    LEM_gsd_new.drop(columns=['LME_NUMBER'], inplace=True)
+                    LEM_gsd_new = LEM_gsd_new.merge(correct_ids, on="LME_NAME", how="left")
 
-                LME = pd.read_excel("LME values.xlsx")
-                LME.columns = LME.iloc[0]
-                LME = LME[1:].reset_index(drop=True)
+                    LME = pd.read_excel("LME values.xlsx")
+                    LME.columns = LME.iloc[0]
+                    LME = LME[1:].reset_index(drop=True)
 
-                required_columns = ['Nov - Jan', 'Feb - Apr', 'May - Jul', 'Aug - Oct']
-                for col in required_columns:
-                    if col not in LME.columns:
-                        raise ValueError(f"Missing required column in LME risk Excel: {col}")
+                    AIS_long_lat = df_ais[['longitude', 'latitude']]
+                    AIS_long_lat.columns = ['Longitude', 'Latitude']
+                    points_cords = [Point(xy) for xy in zip(AIS_long_lat.Longitude, AIS_long_lat.Latitude)]
+                    Route = gpd.GeoDataFrame(AIS_long_lat, geometry=points_cords, crs='EPSG:4326')
 
-                AIS_long_lat = df_ais[['longitude', 'latitude']]
-                AIS_long_lat.columns = ['Longitude', 'Latitude']
-                points_cords = [Point(xy) for xy in zip(AIS_long_lat.Longitude, AIS_long_lat.Latitude)]
-                Route = gpd.GeoDataFrame(AIS_long_lat, geometry=points_cords, crs='EPSG:4326')
+                    Route = gpd.sjoin(Route, LEM_gsd_new[['geometry', 'LME_NUMBER']], how="left", predicate='within')
+                    Route['ID'] = Route['LME_NUMBER']
+                    Route['Datetime'] = df_ais['DateTime']
+                    result = pd.merge(Route, LME, how="left", on="ID")
+                    result['months'] = result['Datetime'].apply(lambda x: x.strftime('%b'))
 
-                Route = gpd.sjoin(Route, LEM_gsd_new[['geometry', 'LME_NUMBER']], how="left", predicate='within')
-                Route['ID'] = Route['LME_NUMBER']
-                Route['Datetime'] = df_ais['DateTime']
+                    # Risk calculation
+                    b = [0] * len(Route['geometry'])
+                    Winter = ['Nov', 'Dec', 'Jan']
+                    Spring = ['Feb', 'Mar', 'Apr']
+                    Summer = ['May', 'Jun', 'Jul']
+                    Autumn = ['Aug', 'Sep', 'Oct']
 
-                result = pd.merge(Route, LME, how="left", on="ID")
-                result['months'] = result['Datetime'].dt.strftime('%b')
+                    for i in range(len(result['geometry'])):
+                        if result['months'][i] in Winter:
+                            b[i] = result['Nov - Jan'][i]
+                        elif result['months'][i] in Spring:
+                            b[i] = result['Feb - Apr'][i]
+                        elif result['months'][i] in Summer:
+                            b[i] = result['May - Jul'][i]
+                        else:
+                            b[i] = result['Aug - Oct'][i]
 
-                Winter = ['Nov', 'Dec', 'Jan']
-                Spring = ['Feb', 'Mar', 'Apr']
-                Summer = ['May', 'Jun', 'Jul']
-                Autumn = ['Aug', 'Sep', 'Oct']
+                    df_ais['risk'] = b
 
-                def assign_risk(row):
-                    if row['months'] in Winter:
-                        return row['Nov - Jan']
-                    elif row['months'] in Spring:
-                        return row['Feb - Apr']
-                    elif row['months'] in Summer:
-                        return row['May - Jul']
-                    else:
-                        return row['Aug - Oct']
+                    last_known_risk = None
+                    new_risks = []
 
-                df_ais['risk'] = result.apply(assign_risk, axis=1)
-
-                last_known_risk = None
-                new_risks = []
-
-                for i in range(len(df_ais)):
-                    current_risk = df_ais.at[i, 'risk']
-                    current_speed = df_ais.at[i, 'speed']
-
-                    if pd.isna(current_risk):
-                        if current_speed == 0:
-                            if last_known_risk is not None:
+                    for i in range(len(df_ais)):
+                        current_risk = df_ais.at[i, 'risk']
+                        current_speed = df_ais.at[i, 'speed']  # assuming column name is 'speed'
+                        
+                        if pd.isna(current_risk):
+                            if current_speed == 0 and last_known_risk is not None:
                                 new_risks.append(last_known_risk)
                             else:
-                                next_known_risk = 'VL'
-                                for j in range(i + 1, len(df_ais)):
-                                    if not pd.isna(df_ais.at[j, 'risk']):
-                                        next_known_risk = df_ais.at[j, 'risk']
-                                        break
-                                new_risks.append(next_known_risk)
+                                new_risks.append('VL')
                         else:
-                            new_risks.append('VL')
-                    else:
-                        new_risks.append(current_risk)
-                        if current_speed > 0:
-                            last_known_risk = current_risk
+                            new_risks.append(current_risk)
+                            if current_speed > 0:
+                                last_known_risk = current_risk  # update last known risk when speed is non-zero
 
-                df_ais['risk'] = new_risks
+                    df_ais['risk'] = new_risks
 
-                st.dataframe(df_ais)
 
+                except Exception as e:
+                    st.error(f"Geospatial or Excel error: {e}")
         except Exception as e:
-            st.error(f"An error occurred during data processing: {e}")
-    ##############Speed and Activity Summary#######################
+            st.error("Unexpected error during API call.")
+
+            
+##############Speed and Activity Summary#######################
         st.set_page_config(layout="wide")
         
         df_ais['Diff'] = df_ais['DateTime'].diff().fillna(pd.Timedelta(0))
@@ -589,7 +701,7 @@ if st.button("Fetch Data"):
 ########## Fouling Challenge #############
 
         # Define x-axis labels
-        x = ['null','VL', 'L', 'M', 'H', 'VH']
+        x = ['null',, 'L', 'M', 'H', 'VH']
         
         # Calculate the percentage weight for each risk level
         df['weight'] = (100 * df['Diff'] / df['Diff'].sum())

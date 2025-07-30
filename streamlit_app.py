@@ -129,8 +129,8 @@ st.title("🚢 AIS Dashboard")
 username = st.secrets["username"]
 password = st.secrets["password"]
 
-imo_input = st.text_input("IMO number(s) (comma separated)", value="9770634")
-start_date = st.date_input("Start Date", value=datetime(2025, 2, 1))
+imo_input = st.text_input("IMO number(s) (comma separated)", value="9246530")
+start_date = st.date_input("Start Date", value=datetime(2024, 2, 1))
 end_date = st.date_input("End Date", value=datetime.today())
 sixhourly = st.selectbox("6-Hourly data?", options=["true", "false"], index=0)
 

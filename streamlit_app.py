@@ -278,7 +278,11 @@ if st.button("Fetch Data"):
                         last_known_risk = current_risk
         
             df_ais['risk'] = new_risks
-
+        
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
             
 ##############Speed and Activity Summary#######################
         st.set_page_config(layout="wide")

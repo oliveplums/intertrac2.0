@@ -246,18 +246,10 @@ if st.button("Fetch Data"):
                         
                         if pd.isna(current_risk):
                             if current_speed == 0:
-                                if last_known_risk is not None:
-                                    new_risks.append(last_known_risk)
-                                else:
-                                    # Use next known risk from future rows if last_known_risk not available
-                                    new_risks.append(next_known_risks.iat[i])
+                                new_risks.append(next_known_risks.iat[i])
                             else:
                                 new_risks.append('VL')
-                        else:
-                            new_risks.append(current_risk)
-                            if current_speed > 0:
-                                last_known_risk = current_risk
-                    
+
                     df_ais['risk'] = new_risks
 
 

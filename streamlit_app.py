@@ -226,7 +226,9 @@ if st.button("Fetch Data"):
         
             # Merge risk values
             result = pd.merge(Route, LME, how="left", on="ID")
-            result['months'] = result['Datetime'].apply(lambda x: x.strftime('%b'))
+            result['Datetime'] = df_ais['DateTime']  # Ensure result has the datetime
+            result['months'] = result['Datetime'].dt.strftime('%b')
+
         
             # Define seasons
             Winter = ['Nov', 'Dec', 'Jan']

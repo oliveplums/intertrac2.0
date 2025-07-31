@@ -249,7 +249,6 @@ if st.button("Fetch Data"):
                             else:
                                 new_risks.iat[i] = 'VL'
                     
-                    Assign the new risk values back
                     df_ais['risk'] = new_risks
 
 

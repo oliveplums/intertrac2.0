@@ -259,6 +259,8 @@ if st.button("Fetch Data"):
                     df_ais['risk'] = new_risks
                 except Exception as e:
                     st.error(f"Failed to set page config: {e}")
+        except Exception as e:
+                st.error(f"Failed to set page config: {e}")
             
 ##############Speed and Activity Summary#######################
         st.set_page_config(layout="wide")

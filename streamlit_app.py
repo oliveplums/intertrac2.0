@@ -234,28 +234,22 @@ if st.button("Fetch Data"):
 
                     df_ais['risk'] = b
 
-                    # # Precompute the next known risk using backward fill
-                    # next_known_risks = df_ais['risk'].fillna(method='bfill')
+                    # Precompute the next known risk using backward fill
+                    next_known_risks = df_ais['risk'].fillna(method='bfill')
                     
-                    # # Create a copy of the current 'risk' column to modify
-                    # new_risks = df_ais['risk'].copy()
+                    # Create a copy of the current 'risk' column to modify
+                    new_risks = df_ais['risk'].copy()
                     
-                    # # Apply logic to fill in missing risk values
-                    # for i in range(len(df_ais)):
-                    #     if pd.isna(new_risks.iat[i]):
-                    #         speed = df_ais.iat[i, df_ais.columns.get_loc('speed')]
-                    #         if speed < 3:
-                    #             new_risks.iat[i] = next_known_risks.iat[i]
-                    #         elif speed >= 3:
-                    #             # Avoid index error at i=0
-                    #             if i > 0 and next_known_risks.iat[i] == next_known_risks.iat[i-1]:
-                    #                 new_risks.iat[i] = next_known_risks.iat[i]
-                    #             else:
-                    #                 new_risks.iat[i] = 'VL'
-                    #         else:
-                    #             new_risks.iat[i] = 'VL'
+                    # Apply logic to fill in missing risk values
+                    for i in range(len(df_ais)):
+                        if pd.isna(new_risks.iat[i]):
+                            speed = df_ais.iat[i, df_ais.columns.get_loc('speed')]
+                            if speed < 5:
+                                new_risks.iat[i] = next_known_risks.iat[i]
+                            else:
+                                new_risks.iat[i] = 'VL'
                     
-                    # Assign the new risk values back
+                    Assign the new risk values back
                     df_ais['risk'] = new_risks
 
 

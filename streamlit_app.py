@@ -188,28 +188,28 @@ if st.button("Fetch Data"):
                     st.success("AIS Data fetched successfully!")
                     st.session_state['df_ais'] = df_ais
 
-                if 'df_ais' in st.session_state:
-                    df_ais = st.session_state['df_ais']
-                
-                    # --- Date range slider ---
-                    min_date = df_ais['DateTime'].min().date()
-                    max_date = df_ais['DateTime'].max().date()
-                
-                    selected_dates = st.slider(
-                        "Select Date Range for All Plots",
-                        min_value=min_date,
-                        max_value=max_date,
-                        value=(min_date, max_date),
-                        format="YYYY-MM-DD"
-                    )
-                
-                    start_slider, end_slider = selected_dates
-                
-                    # Filter dataframe for plots
-                    df_ais_filtered = df_ais[
-                        (df_ais['DateTime'].dt.date >= start_slider) &
-                        (df_ais['DateTime'].dt.date <= end_slider)
-                    ]
+                    if 'df_ais' in st.session_state:
+                        df_ais = st.session_state['df_ais']
+                    
+                        # --- Date range slider ---
+                        min_date = df_ais['DateTime'].min().date()
+                        max_date = df_ais['DateTime'].max().date()
+                    
+                        selected_dates = st.slider(
+                            "Select Date Range for All Plots",
+                            min_value=min_date,
+                            max_value=max_date,
+                            value=(min_date, max_date),
+                            format="YYYY-MM-DD"
+                        )
+                    
+                        start_slider, end_slider = selected_dates
+                    
+                        # Filter dataframe for plots
+                        df_ais_filtered = df_ais[
+                            (df_ais['DateTime'].dt.date >= start_slider) &
+                            (df_ais['DateTime'].dt.date <= end_slider)
+                        ]
             
 
 

@@ -148,20 +148,6 @@ if st.button("Fetch Data"):
                 voyage_data = get_voyage_history(username, password, imo_list, days_ago, end_date)
                 timestamp_changes = detect_mmsi_changes(voyage_data, end_date.isoformat())
 
-            # # SQLite vessel info
-            # try:
-            #     imo_for_db = imo_list[0]
-            #     with sqlite3.connect("my_sqlite.db") as cnn:
-            #         query = f"SELECT * FROM vesselInfo WHERE LRIMOShipNo = {imo_for_db};"
-            #         dfVesselInfo = pd.read_sql(query, cnn)
-
-            #     if not dfVesselInfo.empty:
-            #         st.subheader("📄 Vessel Information from Local DB")
-            #         st.dataframe(dfVesselInfo)
-            #     else:
-            #         st.warning(f"No vessel info found in local DB for IMO {imo_for_db}")
-            # except Exception as e:
-            #     st.error(f"SQLite DB error: {e}")
 
             # AIS positions
             if not timestamp_changes or len(timestamp_changes[0]) < 3:
@@ -170,47 +156,103 @@ if st.button("Fetch Data"):
                 df_ais = fetch_and_combine_ais(username, password, timestamp_changes,
                                                start_date.isoformat(), end_date.isoformat(), sixhourly)
 
-                if df_ais.empty:
-                    st.warning("No AIS data retrieved for the given IMO and date range.")
-                else:
-                    st.subheader("🛰️ AIS Positions")
-                    st.dataframe(df_ais)
-
-                    # ---- LME + Risk Calculation ----
-                    # Load LME shapefile (adjust path to your file)
-                    LEM_gsd_new = gpd.read_file("LMEPolygon1/LMEs66.shp")
-                    LEM_gsd_new = LEM_gsd_new.merge(correct_ids, on="LME_NAME", how="left")
+                if df_ais.empty: 
+                    st.warning("No AIS position data found for the selected criteria.") 
+                else: 
+                    st.success("AIS Data fetched successfully!") 
+                    st.session_state['df_ais'] = df_ais 
                     
-                    # Convert AIS DataFrame to GeoDataFrame
-                    gdf_ais = gpd.GeoDataFrame(df_ais,
-                                               geometry=gpd.points_from_xy(df_ais.longitude, df_ais.latitude),
-                                               crs=LEM_gsd_new.crs)
+# ---- LME Shapefile and Excel Info ----
+try:
+    LMEPolygon = "LMEPolygon1/LMEs66.shp"
+    LMEPolygon_path = os.path.abspath(LMEPolygon)
+    LME_sf = gpd.read_file(LMEPolygon_path)
+    LEM_gsd_new = LME_sf.to_crs(epsg=4326)
+    LEM_gsd_new.dropna(subset=['OBJECTID'], inplace=True)
+    LEM_gsd_new.drop(columns=['LME_NUMBER'], inplace=True)
+    LEM_gsd_new = LEM_gsd_new.merge(correct_ids, on="LME_NAME", how="left")
 
-                    # Spatial join
-                    gdf_ais = gpd.sjoin(gdf_ais, LEM_gsd_new[['geometry', 'LME_NUMBER']], how='left', predicate='within')
-                    
-                    # Assign risk based on month & LME (example: placeholder logic)
-                    gdf_ais['month'] = gdf_ais['DateTime'].dt.month
-                    gdf_ais['risk'] = np.where(gdf_ais['speed'] >= 3, 'VL', 'L')  # placeholder, replace with your risk logic
+    LME = pd.read_excel("LME values.xlsx")
+    LME.columns = LME.iloc[0]
+    LME = LME[1:].reset_index(drop=True)
 
-                    st.subheader("🛑 AIS Positions with Risk")
-                    st.dataframe(gdf_ais[['DateTime', 'latitude', 'longitude', 'speed', 'LME_NUMBER', 'risk']])
+    AIS_long_lat = df_ais[['longitude', 'latitude']]
+    AIS_long_lat.columns = ['Longitude', 'Latitude']
+    points_cords = [Point(xy) for xy in zip(AIS_long_lat.Longitude, AIS_long_lat.Latitude)]
+    Route = gpd.GeoDataFrame(AIS_long_lat, geometry=points_cords, crs='EPSG:4326')
+    Route = gpd.sjoin(
+        Route,
+        LEM_gsd_new[['geometry', 'LME_NUMBER']],
+        how="left",
+        predicate='within'
+    )
+    Route['ID'] = Route['LME_NUMBER']
+    Route['Datetime'] = df_ais['DateTime']
 
-                    # ---- Plot Map ----
-                    fig = px.scatter_mapbox(
-                        gdf_ais,
-                        lat="latitude",
-                        lon="longitude",
-                        color="risk",
-                        hover_data=["DateTime", "speed", "LME_NUMBER"],
-                        zoom=2,
-                        mapbox_style="carto-positron"
-                    )
-                    st.plotly_chart(fig)
+    result = pd.merge(Route, LME, how="left", on="ID")
+    result['months'] = result['Datetime'].apply(lambda x: x.strftime('%b'))
 
-        except Exception as e:
-            st.error(f"Error fetching or processing data: {e}")
+    # Risk calculation
+    b = [0] * len(Route['geometry'])
+    Winter = ['Nov', 'Dec', 'Jan']
+    Spring = ['Feb', 'Mar', 'Apr']
+    Summer = ['May', 'Jun', 'Jul']
+    Autumn = ['Aug', 'Sep', 'Oct']
 
+    for i in range(len(result['geometry'])):
+        month = result['months'][i]
+        if month in Winter:
+            b[i] = result['Nov - Jan'][i]
+        elif month in Spring:
+            b[i] = result['Feb - Apr'][i]
+        elif month in Summer:
+            b[i] = result['May - Jul'][i]
+        else:
+            b[i] = result['Aug - Oct'][i]
+
+    df_ais['risk'] = b
+
+    # Precompute the next known risk using backward fill
+    next_known_risks = df_ais['risk'].fillna(method='bfill')
+    new_risks = df_ais['risk'].copy()
+
+    for i in range(len(df_ais)):
+        if pd.isna(new_risks.iat[i]):
+            speed = df_ais.iat[i, df_ais.columns.get_loc('speed')]
+            if speed < 3:
+                new_risks.iat[i] = next_known_risks.iat[i]
+            else:
+                new_risks.iat[i] = 'VL'
+
+    df_ais['risk'] = new_risks
+
+except Exception as e:
+    st.error(f"Error processing LME shapefile or Excel: {e}")
+
+# --- Example plot usage ---
+st.set_page_config(layout="wide")
+
+############## Speed and Activity Summary #######################
+if 'df_ais' in st.session_state and st.session_state['df_ais'] is not None:
+    df_ais = st.session_state['df_ais']
+
+    min_date = df_ais['DateTime'].min().date()
+    max_date = df_ais['DateTime'].max().date()
+
+    selected_dates = st.slider(
+        "Select Date Range for All Plots",
+        min_value=min_date,
+        max_value=max_date,
+        value=(min_date, max_date),
+        format="YYYY-MM-DD"
+    )
+
+    start_slider, end_slider = selected_dates
+    df_ais_filtered = df_ais[
+        (df_ais['DateTime'].dt.date >= start_slider) &
+        (df_ais['DateTime'].dt.date <= end_slider)
+    ]
+    st.dataframe(df_ais_filtered)
 # --- Example plot usage ---                
 st.set_page_config(layout="wide")
         

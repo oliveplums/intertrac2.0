@@ -270,7 +270,6 @@ if 'df_ais' in st.session_state and st.session_state['df_ais'] is not None:
         min_value=min_date,
         max_value=max_date,
         value=(min_date, max_date),
-        format="YYYY-MM-DD"
     )
 
     start_slider, end_slider = selected_dates

@@ -211,6 +211,9 @@ if st.button("Fetch Data"):
         except Exception as e:
             st.error(f"Error fetching or processing data: {e}")
 
+# --- Example plot usage ---                
+st.set_page_config(layout="wide")
+        
 ##############Speed and Activity Summary#######################
 if 'df_ais' in st.session_state and st.session_state['df_ais'] is not None:
     df_ais = st.session_state['df_ais']

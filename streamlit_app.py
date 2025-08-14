@@ -186,9 +186,7 @@ if st.button("Fetch Data"):
                     st.warning("No AIS position data found for the selected criteria.")
                 else:
                     st.success("AIS Data fetched successfully!")
-                    df_ais = st.session_state['df_ais']
-                    df_ais_filtered = st.session_state['df_ais']
-                
+
 
 
                 # ---- LME Shapefile and Excel Info ----
@@ -206,14 +204,14 @@ if st.button("Fetch Data"):
                     LME.columns = LME.iloc[0]
                     LME = LME[1:].reset_index(drop=True)
 
-                    AIS_long_lat = df_ais_filtered[['longitude', 'latitude']]
+                    AIS_long_lat = df_ais[['longitude', 'latitude']]
                     AIS_long_lat.columns = ['Longitude', 'Latitude']
                     points_cords = [Point(xy) for xy in zip(AIS_long_lat.Longitude, AIS_long_lat.Latitude)]
                     Route = gpd.GeoDataFrame(AIS_long_lat, geometry=points_cords, crs='EPSG:4326')
 
                     Route = gpd.sjoin(Route, LEM_gsd_new[['geometry', 'LME_NUMBER']], how="left", predicate='within')
                     Route['ID'] = Route['LME_NUMBER']
-                    Route['Datetime'] = df_ais_filtered['DateTime']
+                    Route['Datetime'] = df_ais['DateTime']
                     result = pd.merge(Route, LME, how="left", on="ID")
                     result['months'] = result['Datetime'].apply(lambda x: x.strftime('%b'))
 
@@ -234,25 +232,25 @@ if st.button("Fetch Data"):
                         else:
                             b[i] = result['Aug - Oct'][i]
 
-                    df_ais_filtered['risk'] = b
+                    df_ais['risk'] = b
 
                     # Precompute the next known risk using backward fill
-                    next_known_risks = df_ais_filtered['risk'].fillna(method='bfill')
+                    next_known_risks = df_ais['risk'].fillna(method='bfill')
                     
                     # Create a copy of the current 'risk' column to modify
-                    new_risks = df_ais_filtered['risk'].copy()
+                    new_risks = df_ais['risk'].copy()
                     
                     # Apply logic to fill in missing risk values
-                    for i in range(len(df_ais_filtered)):
+                    for i in range(len(df_ais)):
                         if pd.isna(new_risks.iat[i]):
-                            speed = df_ais_filtered.iat[i, df_ais_filtered.columns.get_loc('speed')]
+                            speed = df_ais.iat[i, df_ais.columns.get_loc('speed')]
                             if speed < 3:
                                 new_risks.iat[i] = next_known_risks.iat[i]
                             else:
                                 new_risks.iat[i] = 'VL'
                     
                     # Assign the new risk values back
-                    df_ais_filtered['risk'] = new_risks
+                    df_ais['risk'] = new_risks
                 except Exception as e:
                     st.error(f"Failed to set page config: {e}")
         except Exception as e:
@@ -261,38 +259,38 @@ if st.button("Fetch Data"):
 ##############Speed and Activity Summary#######################
         st.set_page_config(layout="wide")
         
-        df_ais_filtered['Diff'] = df_ais_filtered['DateTime'].diff().fillna(pd.Timedelta(0))
+        df_ais['Diff'] = df_ais['DateTime'].diff().fillna(pd.Timedelta(0))
 
         # 3. Calculate Time Difference
         diff=[]
 
-        for n in range(len(df_ais_filtered['DateTime'])-1):
-            diff.append(df_ais_filtered['DateTime'].iloc[n+1]-df_ais_filtered['DateTime'].iloc[n])
+        for n in range(len(df_ais['DateTime'])-1):
+            diff.append(df_ais['DateTime'].iloc[n+1]-df_ais['DateTime'].iloc[n])
         diff=[timedelta(days=0, seconds=0, microseconds=0, milliseconds=0, minutes=0, hours=0, weeks=0)] + diff
-        df_ais_filtered['Time Spent'] = diff
-        df_ais_filtered['Time Spent (Hours)'] = df_ais_filtered['Time Spent'].dt.total_seconds() / 3600
-        df_ais_filtered['SeaMiles'] = df_ais_filtered['speed']*df_ais_filtered['Time Spent'].dt.total_seconds()*0.0002777778
+        df_ais['Time Spent'] = diff
+        df_ais['Time Spent (Hours)'] = df_ais['Time Spent'].dt.total_seconds() / 3600
+        df_ais['SeaMiles'] = df_ais['speed']*df_ais['Time Spent'].dt.total_seconds()*0.0002777778
 
 
 
         # Distance in nautical miles (speed in knots * hours)
-        df_ais_filtered['distance'] = df_ais_filtered['speed'] * 0.0002777778 * df_ais_filtered['Diff'].dt.total_seconds()
+        df_ais['distance'] = df_ais['speed'] * 0.0002777778 * df_ais['Diff'].dt.total_seconds()
         
         # Sea Miles per Month (SMM)
-        n = len(df_ais_filtered) - 1
-        total_time_months = (df_ais_filtered['DateTime'].iloc[n] - df_ais_filtered['DateTime'].iloc[0]).total_seconds() / 2.628e+6
-        smm = df_ais_filtered['distance'].sum() / total_time_months if total_time_months else 0
+        n = len(df_ais) - 1
+        total_time_months = (df_ais['DateTime'].iloc[n] - df_ais['DateTime'].iloc[0]).total_seconds() / 2.628e+6
+        smm = df_ais['distance'].sum() / total_time_months if total_time_months else 0
         
         # Total sea miles
-        total_miles = df_ais_filtered['distance'].sum()
+        total_miles = df_ais['distance'].sum()
         
         # % Activity above 10 knots
-        above_10 = df_ais_filtered[df_ais_filtered['speed'] > 10]
-        perc_above_10 = (above_10['Diff'].sum() / df_ais_filtered['Diff'].sum()) * 100 if df_ais_filtered['Diff'].sum().total_seconds() > 0 else 0
+        above_10 = df_ais[df_ais['speed'] > 10]
+        perc_above_10 = (above_10['Diff'].sum() / df_ais['Diff'].sum()) * 100 if df_ais['Diff'].sum().total_seconds() > 0 else 0
         
         # % Activity above 3 knots
-        above_3 = df_ais_filtered[df_ais_filtered['speed'] > 3]
-        perc_above_3 = (above_3['Diff'].sum() / df_ais_filtered['Diff'].sum()) * 100 if df_ais_filtered['Diff'].sum().total_seconds() > 0 else 0
+        above_3 = df_ais[df_ais['speed'] > 3]
+        perc_above_3 = (above_3['Diff'].sum() / df_ais['Diff'].sum()) * 100 if df_ais['Diff'].sum().total_seconds() > 0 else 0
         
 
         # Create the summary table
@@ -322,7 +320,7 @@ if st.button("Fetch Data"):
         st.dataframe(styled_df, use_container_width=True)
 
 ########## Static Period Caluclations #############
-        df=df_ais_filtered.copy()
+        df=df_ais.copy()
 
         # Step 1: Mark periods of inactivity
         df['inactive'] = df['speed'] < 3

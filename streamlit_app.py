@@ -178,7 +178,7 @@ if st.button("Fetch Data"):
 
                     # ---- LME + Risk Calculation ----
                     # Load LME shapefile (adjust path to your file)
-                    LEM_gsd_new = gpd.read_file("path_to_your_LME_shapefile.shp")
+                    LEM_gsd_new = gpd.read_file("LMEPolygon1/LMEs66.shp")
                     LEM_gsd_new = LEM_gsd_new.merge(correct_ids, on="LME_NAME", how="left")
                     
                     # Convert AIS DataFrame to GeoDataFrame

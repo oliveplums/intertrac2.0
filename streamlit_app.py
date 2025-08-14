@@ -212,26 +212,26 @@ if st.button("Fetch Data"):
             st.error(f"Error fetching or processing data: {e}")
 
 ##############Speed and Activity Summary#######################
-# if 'df_ais' in st.session_state and st.session_state['df_ais'] is not None:
-#     df_ais = st.session_state['df_ais']
+if 'df_ais' in st.session_state and st.session_state['df_ais'] is not None:
+    df_ais = st.session_state['df_ais']
 
-#     min_date = df_ais['DateTime'].min().date()
-#     max_date = df_ais['DateTime'].max().date()
+    min_date = df_ais['DateTime'].min().date()
+    max_date = df_ais['DateTime'].max().date()
 
-#     selected_dates = st.slider(
-#         "Select Date Range for All Plots",
-#         min_value=min_date,
-#         max_value=max_date,
-#         value=(min_date, max_date),
-#         format="YYYY-MM-DD"
-#     )
+    selected_dates = st.slider(
+        "Select Date Range for All Plots",
+        min_value=min_date,
+        max_value=max_date,
+        value=(min_date, max_date),
+        format="YYYY-MM-DD"
+    )
 
-#     start_slider, end_slider = selected_dates
-#     df_ais_filtered = df_ais[
-#         (df_ais['DateTime'].dt.date >= start_slider) &
-#         (df_ais['DateTime'].dt.date <= end_slider)
-#     ]
-#     st.dataframe(df_ais_filtered)  # Replace with your actual plots
+    start_slider, end_slider = selected_dates
+    df_ais_filtered = df_ais[
+        (df_ais['DateTime'].dt.date >= start_slider) &
+        (df_ais['DateTime'].dt.date <= end_slider)
+    ]
+    st.dataframe(df_ais_filtered)  # Replace with your actual plots
 
 ##############Speed and Activity Summary#######################    
         # --- Example plot usage ---                

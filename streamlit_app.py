@@ -156,20 +156,20 @@ if st.button("Fetch Data"):
                 voyage_data = get_voyage_history(username, password, imo_list, days_ago, end_date)
                 timestamp_changes = detect_mmsi_changes(voyage_data, end_date.isoformat())
                 
-# ---- SQLite vessel info ----
-            # try:
-            #     imo_for_db = imo_list[0]
-            #     with sqlite3.connect("my_sqlite.db") as cnn:
-            #         query = f"SELECT * FROM vesselInfo WHERE LRIMOShipNo = {imo_for_db};"
-            #         dfVesselInfo = pd.read_sql(query, cnn)
+---- SQLite vessel info ----
+            try:
+                imo_for_db = imo_list[0]
+                with sqlite3.connect("my_sqlite.db") as cnn:
+                    query = f"SELECT * FROM vesselInfo WHERE LRIMOShipNo = {imo_for_db};"
+                    dfVesselInfo = pd.read_sql(query, cnn)
 
-            #     if not dfVesselInfo.empty:
-            #         st.subheader("📄 Vessel Information from Local DB")
-            #         st.dataframe(dfVesselInfo)
-            #     else:
-            #         st.warning(f"No vessel info found in local DB for IMO {imo_for_db}")
-            # except Exception as e:
-            #     st.error(f"SQLite DB error: {e}")
+                if not dfVesselInfo.empty:
+                    st.subheader("📄 Vessel Information from Local DB")
+                    st.dataframe(dfVesselInfo)
+                else:
+                    st.warning(f"No vessel info found in local DB for IMO {imo_for_db}")
+            except Exception as e:
+                st.error(f"SQLite DB error: {e}")
         
             if not timestamp_changes or len(timestamp_changes[0]) < 3:
                 st.error("Unable to detect MMSI transitions – voyage data might be incomplete or invalid.")

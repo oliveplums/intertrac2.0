@@ -1,20 +1,15 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Sequence
 import urllib3
 import sqlite3
 import geopandas as gpd
 import plotly.express as px
-import os 
+import os
 from shapely.geometry import Point
-import plotly.graph_objects as go
 import numpy as np
-import math
-import bisect
-import plotly.colors as pc
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -65,7 +60,6 @@ def fetch_and_combine_ais(username, password, timestamp_changes, start, end, six
     end_dt = datetime.fromisoformat(end + 'T00:00:00')
 
     mmsi_list = [timestamp_changes[0][0], timestamp_changes[0][1]]
-    # If both MMSIs are the same, just keep one
     if mmsi_list[0] == mmsi_list[1]:
         mmsi_list = [mmsi_list[0]]
 
@@ -90,10 +84,11 @@ def fetch_and_combine_ais(username, password, timestamp_changes, start, end, six
         df_combined = pd.concat([df_combined, df])
 
     df_cleaned = df_combined.drop_duplicates(subset='DateTime').reset_index(drop=True)
-    df = df_cleaned[df_cleaned['speed'] < 30]
-    df = df.drop_duplicates(subset='DateTime').sort_values('DateTime').reset_index(drop=True)
-    return df
+    df_cleaned = df_cleaned[df_cleaned['speed'] < 30]
+    df_cleaned = df_cleaned.drop_duplicates(subset='DateTime').sort_values('DateTime').reset_index(drop=True)
+    return df_cleaned
 
+# ---- Correct LME IDs ----
 correct_ids = pd.DataFrame({
     "LME_NAME": [
         "Agulhas Current", "Aleutian Islands", "Antarctica", "Arabian Sea", "Central Arctic",
@@ -134,29 +129,26 @@ start_date = st.date_input("Start Date", value=datetime(2024, 2, 1))
 end_date = st.date_input("End Date", value=datetime.today())
 sixhourly = st.selectbox("6-Hourly data?", options=["true", "false"], index=0)
 
-# Session state handling for the checkbox
 if "mmsi_gap_enabled" not in st.session_state:
     st.session_state["mmsi_gap_enabled"] = False
-
-# Now show the checkbox, linked to session state
 mmsi_gap_checkbox = st.checkbox("Check MMSI Change: Gap Search", value=st.session_state["mmsi_gap_enabled"])
 
-            
+# ---- Fetch Data ----
 if st.button("Fetch Data"):
     with st.spinner("Fetching voyage and AIS data..."):
         try:
             imo_list = list(map(int, imo_input.split(',')))
-                
-            # Always get voyage_data
-            if mmsi_gap_checkbox==True:
+
+            # Voyage data
+            if mmsi_gap_checkbox:
                 voyage_data = get_voyage_history(username, password, imo_list, start_date, end_date)
                 timestamp_changes = detect_mmsi_changes(voyage_data, end_date.isoformat())
             else:
-                days_ago = end_date- timedelta(days=10)
+                days_ago = end_date - timedelta(days=10)
                 voyage_data = get_voyage_history(username, password, imo_list, days_ago, end_date)
                 timestamp_changes = detect_mmsi_changes(voyage_data, end_date.isoformat())
-                
----- SQLite vessel info ----
+
+            # SQLite vessel info
             try:
                 imo_for_db = imo_list[0]
                 with sqlite3.connect("my_sqlite.db") as cnn:
@@ -170,92 +162,55 @@ if st.button("Fetch Data"):
                     st.warning(f"No vessel info found in local DB for IMO {imo_for_db}")
             except Exception as e:
                 st.error(f"SQLite DB error: {e}")
-        
+
+            # AIS positions
             if not timestamp_changes or len(timestamp_changes[0]) < 3:
                 st.error("Unable to detect MMSI transitions – voyage data might be incomplete or invalid.")
             else:
-                df_ais = fetch_and_combine_ais(
-                    username, password,
-                    timestamp_changes,
-                    start_date.isoformat(),
-                    end_date.isoformat(),
-                    sixhourly
-                )
-        
+                df_ais = fetch_and_combine_ais(username, password, timestamp_changes,
+                                               start_date.isoformat(), end_date.isoformat(), sixhourly)
+
                 if df_ais.empty:
-                    st.warning("No AIS position data found for the selected criteria.")
+                    st.warning("No AIS data retrieved for the given IMO and date range.")
                 else:
-                    st.success("AIS Data fetched successfully!")
-                    st.session_state['df_ais'] = df_ais
+                    st.subheader("🛰️ AIS Positions")
+                    st.dataframe(df_ais)
 
-
-                # ---- LME Shapefile and Excel Info ----
-                try:
-                    LMEPolygon = "LMEPolygon1/LMEs66.shp"
-                    LMEPolygon_path = os.path.abspath(LMEPolygon)
-                    LME_sf = gpd.read_file(LMEPolygon_path)
-                    LEM_gsd_new = LME_sf.to_crs(epsg=4326)
-
-                    LEM_gsd_new.dropna(subset=['OBJECTID'], inplace=True)
-                    LEM_gsd_new.drop(columns=['LME_NUMBER'], inplace=True)
+                    # ---- LME + Risk Calculation ----
+                    # Load LME shapefile (adjust path to your file)
+                    LEM_gsd_new = gpd.read_file("path_to_your_LME_shapefile.shp")
                     LEM_gsd_new = LEM_gsd_new.merge(correct_ids, on="LME_NAME", how="left")
-
-                    LME = pd.read_excel("LME values.xlsx")
-                    LME.columns = LME.iloc[0]
-                    LME = LME[1:].reset_index(drop=True)
-
-                    AIS_long_lat = df_ais[['longitude', 'latitude']]
-                    AIS_long_lat.columns = ['Longitude', 'Latitude']
-                    points_cords = [Point(xy) for xy in zip(AIS_long_lat.Longitude, AIS_long_lat.Latitude)]
-                    Route = gpd.GeoDataFrame(AIS_long_lat, geometry=points_cords, crs='EPSG:4326')
-
-                    Route = gpd.sjoin(Route, LEM_gsd_new[['geometry', 'LME_NUMBER']], how="left", predicate='within')
-                    Route['ID'] = Route['LME_NUMBER']
-                    Route['Datetime'] = df_ais_filtered['DateTime']
-                    result = pd.merge(Route, LME, how="left", on="ID")
-                    result['months'] = result['Datetime'].apply(lambda x: x.strftime('%b'))
-
-                    # Risk calculation
-                    b = [0] * len(Route['geometry'])
-                    Winter = ['Nov', 'Dec', 'Jan']
-                    Spring = ['Feb', 'Mar', 'Apr']
-                    Summer = ['May', 'Jun', 'Jul']
-                    Autumn = ['Aug', 'Sep', 'Oct']
-
-                    for i in range(len(result['geometry'])):
-                        if result['months'][i] in Winter:
-                            b[i] = result['Nov - Jan'][i]
-                        elif result['months'][i] in Spring:
-                            b[i] = result['Feb - Apr'][i]
-                        elif result['months'][i] in Summer:
-                            b[i] = result['May - Jul'][i]
-                        else:
-                            b[i] = result['Aug - Oct'][i]
-
-                    df_ais_filtered['risk'] = b
-
-                    # Precompute the next known risk using backward fill
-                    next_known_risks = df_ais_filtered['risk'].fillna(method='bfill')
                     
-                    # Create a copy of the current 'risk' column to modify
-                    new_risks = df_ais_filtered['risk'].copy()
+                    # Convert AIS DataFrame to GeoDataFrame
+                    gdf_ais = gpd.GeoDataFrame(df_ais,
+                                               geometry=gpd.points_from_xy(df_ais.longitude, df_ais.latitude),
+                                               crs=LEM_gsd_new.crs)
+
+                    # Spatial join
+                    gdf_ais = gpd.sjoin(gdf_ais, LEM_gsd_new[['geometry', 'LME_NUMBER']], how='left', predicate='within')
                     
-                    # Apply logic to fill in missing risk values
-                    for i in range(len(df_ais_filtered)):
-                        if pd.isna(new_risks.iat[i]):
-                            speed = df_ais_filtered.iat[i, df_ais_filtered.columns.get_loc('speed')]
-                            if speed < 3:
-                                new_risks.iat[i] = next_known_risks.iat[i]
-                            else:
-                                new_risks.iat[i] = 'VL'
-                    
-                    # Assign the new risk values back
-                    df_ais_filtered['risk'] = new_risks
-                except Exception as e:
-                    st.error(f"Failed to set page config: {e}")
+                    # Assign risk based on month & LME (example: placeholder logic)
+                    gdf_ais['month'] = gdf_ais['DateTime'].dt.month
+                    gdf_ais['risk'] = np.where(gdf_ais['speed'] >= 3, 'VL', 'L')  # placeholder, replace with your risk logic
+
+                    st.subheader("🛑 AIS Positions with Risk")
+                    st.dataframe(gdf_ais[['DateTime', 'latitude', 'longitude', 'speed', 'LME_NUMBER', 'risk']])
+
+                    # ---- Plot Map ----
+                    fig = px.scatter_mapbox(
+                        gdf_ais,
+                        lat="latitude",
+                        lon="longitude",
+                        color="risk",
+                        hover_data=["DateTime", "speed", "LME_NUMBER"],
+                        zoom=2,
+                        mapbox_style="carto-positron"
+                    )
+                    st.plotly_chart(fig)
+
         except Exception as e:
-                st.error(f"Failed to set page config: {e}")
-            
+            st.error(f"Error fetching or processing data: {e}")
+
 ##############Speed and Activity Summary#######################
 # if 'df_ais' in st.session_state and st.session_state['df_ais'] is not None:
 #     df_ais = st.session_state['df_ais']

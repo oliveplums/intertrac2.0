@@ -161,6 +161,8 @@ if st.button("Fetch Data"):
                 else: 
                     st.success("AIS Data fetched successfully!") 
                     st.session_state['df_ais'] = df_ais 
+        except Exception as e:
+            st.error(f"Error processing LME shapefile or Excel: {e}")
                     
 # ---- LME Shapefile and Excel Info ----
 try:

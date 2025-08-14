@@ -186,26 +186,8 @@ if st.button("Fetch Data"):
                     st.warning("No AIS position data found for the selected criteria.")
                 else:
                     st.success("AIS Data fetched successfully!")
-
-                    # --- Add a date range slider for all plots ---
-                    min_date = df_ais['DateTime'].min().date()
-                    max_date = df_ais['DateTime'].max().date()
-                
-                    selected_dates = st.slider(
-                        "Select Date Range for All Plots",
-                        min_value=min_date,
-                        max_value=max_date,
-                        value=(min_date, max_date),
-                        format="YYYY-MM-DD"
-                    )
-                
-                    start_slider, end_slider = selected_dates
-                
-                    # Filter the AIS dataframe
-                    df_ais_filtered = df_ais[
-                        (df_ais['DateTime'].dt.date >= start_slider) &
-                        (df_ais['DateTime'].dt.date <= end_slider)
-                    ]
+                    df_ais = st.session_state['df_ais']
+                    df_ais_filtered = st.session_state['df_ais']
                 
 
 

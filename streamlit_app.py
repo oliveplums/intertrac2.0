@@ -186,8 +186,12 @@ if st.button("Fetch Data"):
                     st.warning("No AIS position data found for the selected criteria.")
                 else:
                     st.success("AIS Data fetched successfully!")
+                    st.session_state['df_ais'] = df_ais
 
-                    # --- Add a date range slider for all plots ---
+                if 'df_ais' in st.session_state:
+                    df_ais = st.session_state['df_ais']
+                
+                    # --- Date range slider ---
                     min_date = df_ais['DateTime'].min().date()
                     max_date = df_ais['DateTime'].max().date()
                 
@@ -201,12 +205,12 @@ if st.button("Fetch Data"):
                 
                     start_slider, end_slider = selected_dates
                 
-                    # Filter the AIS dataframe
+                    # Filter dataframe for plots
                     df_ais_filtered = df_ais[
                         (df_ais['DateTime'].dt.date >= start_slider) &
                         (df_ais['DateTime'].dt.date <= end_slider)
                     ]
-                
+            
 
 
                 # ---- LME Shapefile and Excel Info ----

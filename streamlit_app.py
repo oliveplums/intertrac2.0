@@ -204,7 +204,7 @@ if st.button("Fetch Data"):
                     LME.columns = LME.iloc[0]
                     LME = LME[1:].reset_index(drop=True)
 
-                    AIS_long_lat = df_ais_filtered[['longitude', 'latitude']]
+                    AIS_long_lat = df_ais[['longitude', 'latitude']]
                     AIS_long_lat.columns = ['Longitude', 'Latitude']
                     points_cords = [Point(xy) for xy in zip(AIS_long_lat.Longitude, AIS_long_lat.Latitude)]
                     Route = gpd.GeoDataFrame(AIS_long_lat, geometry=points_cords, crs='EPSG:4326')

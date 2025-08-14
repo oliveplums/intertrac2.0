@@ -276,10 +276,10 @@ if st.button("Fetch Data"):
 #         (df_ais['DateTime'].dt.date >= start_slider) &
 #         (df_ais['DateTime'].dt.date <= end_slider)
 #     ]
-    
-        # --- Example plot usage ---
-        st.dataframe(df_ais_filtered)  # Replace with your actual plots
-                
+#     st.dataframe(df_ais_filtered)  # Replace with your actual plots
+
+##############Speed and Activity Summary#######################    
+        # --- Example plot usage ---                
         st.set_page_config(layout="wide")
         
         df_ais_filtered['Diff'] = df_ais_filtered['DateTime'].diff().fillna(pd.Timedelta(0))
